@@ -1,0 +1,15 @@
+[package]
+name = "discordnamechanger"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+derangement = "0.1.3"
+futures = "0.3.28"
+log = "0.4.19"
+rand = "0.8.5"
+serenity = "0.11.6"
+simple_logger = "4.2.0"
+tokio = { version = "1.29.1", features = ["rt-multi-thread"] }
