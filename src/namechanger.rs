@@ -22,11 +22,9 @@ use simple_logger::SimpleLogger;
 
 use sled::Db;
 
-use crate::namechanger::db::{
+use crate::db::{
     get_name, has_overridden_name, make_name_batch, name_overrides_db_tree_name, DbKey,
 };
-
-mod db;
 
 fn current_champion_from_activities<'a, I: IntoIterator<Item = &'a Activity>>(
     activities: I,
