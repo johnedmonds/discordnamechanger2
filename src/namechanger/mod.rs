@@ -20,12 +20,9 @@ use serenity::{
 use simple_logger::SimpleLogger;
 
 use nick_overrides::nick_override;
-use sled::{Batch, IVec, Tree};
+use sled::{Batch, Db, IVec, Tree};
 
 mod nick_overrides;
-
-const NAMES_TREE: &str = "names";
-const NAME_OVERRIDES_TREE: &str = "name_overrides";
 
 fn current_champion_from_activities<'a, I: IntoIterator<Item = &'a Activity>>(
     activities: I,
@@ -42,8 +39,7 @@ fn current_champion_from_activities<'a, I: IntoIterator<Item = &'a Activity>>(
         .map(String::as_str)
 }
 struct Handler {
-    names: Tree,
-    name_overrides: Tree,
+    db: Db,
 }
 
 fn gen_derangement(size: usize) -> Vec<usize> {
@@ -99,8 +95,8 @@ fn get_guild_voice_channels(
         .filter(|channel| channel.kind == ChannelType::Voice)
 }
 
-fn get_name(tree: &Tree, user_id: UserIdDbKey) -> Option<String> {
-    match tree.get(user_id.as_key()) {
+fn get_name(tree: &Tree, user_id: DbKey) -> Option<String> {
+    match tree.get(user_id) {
         Err(e) => {
             warn!("Failed to get name for {user_id}: {e}");
             None
@@ -120,29 +116,36 @@ trait BatchAddable {
 }
 impl<'a> BatchAddable for (UserId, &'a str) {
     fn add_to_batch(&self, batch: &mut Batch) {
-        batch.insert(UserIdDbKey(self.0), self.1);
+        info!("Adding hardcoded {}", self.1);
+        batch.insert(IVec::from(DbKey::from(self.0).as_ref()), self.1);
     }
 }
 impl<'a> BatchAddable for &'a Member {
     fn add_to_batch(&self, batch: &mut Batch) {
+        info!("Adding member {}", self.display_name());
         (self.user.id, self.display_name().as_str()).add_to_batch(batch);
     }
 }
 #[derive(Clone, Copy)]
-struct UserIdDbKey(UserId);
-impl UserIdDbKey {
-    fn as_key(&self) -> [u8; 8] {
-        self.0 .0.to_be_bytes()
+struct DbKey([u8; 8]);
+impl From<UserId> for DbKey {
+    fn from(value: UserId) -> Self {
+        Self(value.0.to_be_bytes())
     }
 }
-impl Display for UserIdDbKey {
+impl From<GuildId> for DbKey {
+    fn from(value: GuildId) -> Self {
+        Self(value.0.to_be_bytes())
+    }
+}
+impl AsRef<[u8]> for DbKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+impl Display for DbKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-impl Into<IVec> for UserIdDbKey {
-    fn into(self) -> IVec {
-        (&self.as_key()).into()
+        write!(f, "{}", u64::from_be_bytes(self.0))
     }
 }
 
@@ -154,20 +157,30 @@ fn make_name_batch<T: BatchAddable, I: Iterator<Item = T>>(members: I) -> Batch 
     batch
 }
 fn has_original_name(member: &Member, name_overrides: &Tree) -> bool {
-    get_name(name_overrides, UserIdDbKey(member.user.id)).as_ref()
+    get_name(name_overrides, DbKey::from(member.user.id)).as_ref()
         == Some(member.display_name().as_ref())
+}
+fn name_overrides_db_tree_name(guild_id: GuildId) -> [u8; 9] {
+    let mut name = [b'o'; 9];
+    name[1..].copy_from_slice(&DbKey::from(guild_id).0);
+    name
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: bool) {
         info!("Guild create for {} ({})", guild.name, guild.id);
-        self.names
+        let names = self.db.open_tree(DbKey::from(guild.id)).unwrap();
+        let name_overrides = self
+            .db
+            .open_tree(name_overrides_db_tree_name(guild.id))
+            .unwrap();
+        names
             .apply_batch(make_name_batch(
                 guild
                     .members
                     .values()
-                    .filter(|member| has_original_name(member, &self.name_overrides)),
+                    .filter(|member| has_original_name(member, &name_overrides)),
             ))
             .unwrap();
         let voice_channels = get_guild_voice_channels(guild.channels);
@@ -280,22 +293,27 @@ impl Handler {
                     info!("Could not determine champion for {} ({}). Selected username for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
                     &member.user.name
                 };
-                (member.user.id, new_nick)
+                (member.user.id, from_user.name.as_str())
             }).collect();
+            let names = self.db.open_tree(DbKey::from(guild_id)).unwrap();
             // First set to the old nicks so that if we crash, the old nick will stick.
             let old_nicks: Vec<_> = members
                 .iter()
                 .flat_map(|member| {
                     Some((
                         member.user.id,
-                        get_name(&self.names, UserIdDbKey(member.user.id))?,
+                        get_name(&names, DbKey::from(member.user.id))?,
                     ))
                 })
                 .collect();
             set_nicks(ctx, guild_id, old_nicks).await;
+            let name_overrides = self
+                .db
+                .open_tree(name_overrides_db_tree_name(guild_id))
+                .unwrap();
             // Clear and set the overrides. We want to record the overrides before we actually make the change just in case we crash in the middle.
-            self.name_overrides.clear().unwrap();
-            self.name_overrides
+            name_overrides.clear().unwrap();
+            name_overrides
                 .apply_batch(make_name_batch(new_nicks.iter().copied()))
                 .unwrap();
             set_nicks(ctx, guild_id, new_nicks).await;
@@ -317,13 +335,8 @@ pub async fn run() {
         | GatewayIntents::GUILDS;
 
     let db = sled::open("names.sled.db").unwrap();
-    let names = db.open_tree(NAMES_TREE).unwrap();
-    let name_overrides = db.open_tree(NAME_OVERRIDES_TREE).unwrap();
     let mut client = Client::builder(token, intents)
-        .event_handler(Handler {
-            names,
-            name_overrides,
-        })
+        .event_handler(Handler { db })
         .framework(StandardFramework::default())
         .await
         .expect("Error creating client");
