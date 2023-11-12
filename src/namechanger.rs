@@ -18,7 +18,6 @@ use serenity::{
     },
     prelude::*,
 };
-use simple_logger::SimpleLogger;
 
 use sled::Db;
 
@@ -310,19 +309,12 @@ impl Handler {
     }
 }
 
-pub async fn run() {
-    let token = std::fs::read_to_string("token.txt").unwrap();
-    SimpleLogger::default()
-        .with_level(log::LevelFilter::Warn)
-        .with_module_level("discordnamechanger", log::LevelFilter::Debug)
-        .init()
-        .unwrap();
+pub async fn run(token: String, db: Db) {
     let intents = GatewayIntents::GUILD_PRESENCES
         | GatewayIntents::GUILD_VOICE_STATES
         | GatewayIntents::GUILDS
         | GatewayIntents::GUILD_MEMBERS;
 
-    let db = sled::open("names.sled.db").unwrap();
     let mut client = Client::builder(token, intents)
         .event_handler(Handler { db })
         .framework(StandardFramework::default())

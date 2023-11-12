@@ -27,7 +27,17 @@ impl<'a> BatchAddable for &'a Member {
 }
 
 #[derive(Clone, Copy)]
-pub struct DbKey([u8; 8]);
+pub struct DbKey(pub [u8; 8]);
+impl From<DbKey> for UserId {
+    fn from(value: DbKey) -> Self {
+        Self(u64::from_be_bytes(value.0))
+    }
+}
+impl From<DbKey> for GuildId {
+    fn from(value: DbKey) -> Self {
+        Self(u64::from_be_bytes(value.0))
+    }
+}
 impl From<UserId> for DbKey {
     fn from(value: UserId) -> Self {
         Self(value.0.to_be_bytes())
@@ -65,7 +75,8 @@ pub fn has_overridden_name(member: &Member, name_overrides: &Tree) -> bool {
     get_name(name_overrides, DbKey::from(member.user.id)).as_ref()
         == Some(member.display_name().as_ref())
 }
-pub fn name_overrides_db_tree_name(guild_id: GuildId) -> [u8; 9] {
+type NameOverridesDbTreeNameType = [u8; 9];
+pub fn name_overrides_db_tree_name(guild_id: GuildId) -> NameOverridesDbTreeNameType {
     let mut name = [b'o'; 9];
     name[1..].copy_from_slice(&DbKey::from(guild_id).0);
     name
