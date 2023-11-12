@@ -300,7 +300,7 @@ impl Handler {
                     info!("Could not determine champion for {} ({}). Selected username for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
                     Cow::Borrowed(member.user.name.as_str())
                 };
-                (member.user.id, from_user.name.as_str())
+                (member.user.id, new_nick)
             }).collect();
             // First set to the old nicks so that if we crash, the old nick will stick.
             let old_nicks: Vec<_> = members
