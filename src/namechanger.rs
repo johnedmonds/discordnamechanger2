@@ -10,8 +10,8 @@ use serenity::{
     model::{
         gateway::Activity,
         prelude::{
-            ActivityType, Channel, ChannelId, ChannelType, Guild, GuildChannel, GuildId, Member,
-            Presence, UserId,
+            ActivityType, ApplicationId, Channel, ChannelId, ChannelType, Guild, GuildChannel,
+            GuildId, Member, Presence, UserId,
         },
         user::User,
         voice::VoiceState,
@@ -25,6 +25,9 @@ use crate::db::{
     get_name, has_overridden_name, make_name_batch, name_overrides_db_tree_name, DbKey,
 };
 
+const LEAGUE_OF_LEGENDS_APPLICATION_ID: Option<ApplicationId> =
+    Some(ApplicationId(401518684763586560));
+
 fn current_champion_from_activities<'a, I: IntoIterator<Item = &'a Activity>>(
     activities: I,
 ) -> Option<&'a str> {
@@ -32,8 +35,8 @@ fn current_champion_from_activities<'a, I: IntoIterator<Item = &'a Activity>>(
         .into_iter()
         .inspect(|activity| debug!("Checking activity {activity:?}"))
         .flat_map(|activity: &Activity| {
-            let is_valid_activity =
-                activity.kind == ActivityType::Playing && activity.name == "League of Legends";
+            let is_valid_activity = activity.kind == ActivityType::Playing
+                && activity.application_id == LEAGUE_OF_LEGENDS_APPLICATION_ID;
             is_valid_activity.then_some(activity.assets.as_ref()?.large_text.as_ref()?)
         })
         .next()
