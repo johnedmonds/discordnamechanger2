@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, pin::pin};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, pin::pin};
 
 use futures::{join, stream::iter, StreamExt};
 use log::{debug, info, warn};
@@ -19,10 +19,7 @@ use serenity::{
 };
 use simple_logger::SimpleLogger;
 
-use nick_overrides::nick_override;
 use sled::{Batch, Db, IVec, Tree};
-
-mod nick_overrides;
 
 fn current_champion_from_activities<'a, I: IntoIterator<Item = &'a Activity>>(
     activities: I,
@@ -114,16 +111,16 @@ fn get_name(tree: &Tree, user_id: DbKey) -> Option<String> {
 trait BatchAddable {
     fn add_to_batch(&self, batch: &mut Batch);
 }
-impl<'a> BatchAddable for (UserId, &'a str) {
+impl<'a, S: AsRef<str>> BatchAddable for &(UserId, S) {
     fn add_to_batch(&self, batch: &mut Batch) {
-        info!("Adding hardcoded {}", self.1);
-        batch.insert(IVec::from(DbKey::from(self.0).as_ref()), self.1);
+        info!("Adding hardcoded {}", self.1.as_ref());
+        batch.insert(IVec::from(DbKey::from(self.0).as_ref()), self.1.as_ref());
     }
 }
 impl<'a> BatchAddable for &'a Member {
     fn add_to_batch(&self, batch: &mut Batch) {
         info!("Adding member {}", self.display_name());
-        (self.user.id, self.display_name().as_str()).add_to_batch(batch);
+        (&(self.user.id, self.display_name().as_str())).add_to_batch(batch);
     }
 }
 #[derive(Clone, Copy)]
@@ -156,7 +153,12 @@ fn make_name_batch<T: BatchAddable, I: Iterator<Item = T>>(members: I) -> Batch 
     }
     batch
 }
-fn has_original_name(member: &Member, name_overrides: &Tree) -> bool {
+fn has_overridden_name(member: &Member, name_overrides: &Tree) -> bool {
+    info!(
+        "Checking {} against {}",
+        get_name(name_overrides, DbKey::from(member.user.id)).unwrap_or("".to_string()),
+        member.display_name()
+    );
     get_name(name_overrides, DbKey::from(member.user.id)).as_ref()
         == Some(member.display_name().as_ref())
 }
@@ -180,7 +182,7 @@ impl EventHandler for Handler {
                 guild
                     .members
                     .values()
-                    .filter(|member| has_original_name(member, &name_overrides)),
+                    .filter(|member| !has_overridden_name(member, &name_overrides)),
             ))
             .unwrap();
         let voice_channels = get_guild_voice_channels(guild.channels);
@@ -235,15 +237,19 @@ impl EventHandler for Handler {
             if let Some(voice_state) = old_state {
                 let restore_leaving_user_name_future = async {
                     if let Some(ref member) = voice_state.member {
-                        let nick_to_restore =
-                            nick_override(member.user.id).unwrap_or(&member.user.name);
+                        let names = self.db.open_tree(DbKey::from(member.guild_id)).unwrap();
+                        let nick_to_restore = get_name(&names, DbKey::from(member.user.id))
+                            .map(Cow::Owned)
+                            .unwrap_or(Cow::Borrowed(&member.user.name));
                         info!(
                             "Restoring nickname {nick_to_restore} to {} ({})",
                             member.user.name, member.user.id
                         );
                         if let Err(e) = member
                             .guild_id
-                            .edit_member(&ctx.http, member.user.id, |m| m.nickname(nick_to_restore))
+                            .edit_member(&ctx.http, member.user.id, |m| {
+                                m.nickname(nick_to_restore.clone())
+                            })
                             .await
                         {
                             warn!(
@@ -277,6 +283,7 @@ impl Handler {
             .unwrap_or(vec![]);
         let derangement = gen_derangement(members.len());
         if let Some(guild) = guild_id.to_guild_cached(&ctx.cache) {
+            let names = self.db.open_tree(DbKey::from(guild_id)).unwrap();
             let new_nicks:Vec<_> = members.iter().enumerate().map(|(user_id_index, member)| {
                 let from_user = &members[derangement[user_id_index]].user;
                 let source_champion_named = guild.presences.get(&from_user.id).and_then(|presence|current_champion_from_activities(&presence.activities));
@@ -285,17 +292,16 @@ impl Handler {
                         "Selected champion {champion} (from {} ({}) as nick for {} ({})",
                         from_user.name, from_user.id, member.user.name, member.user.id
                     );
-                    champion
-                } else if let Some(nick) = nick_override(member.user.id) {
+                    Cow::Borrowed(champion)
+                } else if let Some(nick) = get_name(&names, DbKey::from(member.user.id) ){
                     info!("Could not determine champion for {} ({}). Selected hardcoded nick {nick} for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
-                    nick
+                    Cow::Owned(nick)
                 } else {
                     info!("Could not determine champion for {} ({}). Selected username for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
-                    &member.user.name
+                    Cow::Borrowed(member.user.name.as_str())
                 };
                 (member.user.id, from_user.name.as_str())
             }).collect();
-            let names = self.db.open_tree(DbKey::from(guild_id)).unwrap();
             // First set to the old nicks so that if we crash, the old nick will stick.
             let old_nicks: Vec<_> = members
                 .iter()
@@ -314,7 +320,7 @@ impl Handler {
             // Clear and set the overrides. We want to record the overrides before we actually make the change just in case we crash in the middle.
             name_overrides.clear().unwrap();
             name_overrides
-                .apply_batch(make_name_batch(new_nicks.iter().copied()))
+                .apply_batch(make_name_batch(new_nicks.iter()))
                 .unwrap();
             set_nicks(ctx, guild_id, new_nicks).await;
         } else {
