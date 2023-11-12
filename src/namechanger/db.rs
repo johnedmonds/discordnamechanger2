@@ -7,10 +7,16 @@ use sled::{Batch, IVec, Tree};
 pub trait BatchAddable {
     fn add_to_batch(&self, batch: &mut Batch);
 }
-impl<'a, S: AsRef<str>> BatchAddable for &(UserId, S) {
+impl<S: AsRef<str>> BatchAddable for &(UserId, S) {
     fn add_to_batch(&self, batch: &mut Batch) {
         info!("Adding hardcoded {}", self.1.as_ref());
-        batch.insert(IVec::from(DbKey::from(self.0).as_ref()), self.1.as_ref());
+        (DbKey::from(self.0), self.1.as_ref()).add_to_batch(batch);
+    }
+}
+impl<S: AsRef<str>> BatchAddable for (DbKey, S) {
+    fn add_to_batch(&self, batch: &mut Batch) {
+        info!("Adding from key {}", self.1.as_ref());
+        batch.insert(IVec::from(self.0.as_ref()), self.1.as_ref());
     }
 }
 impl<'a> BatchAddable for &'a Member {

@@ -13,6 +13,7 @@ use serenity::{
             ActivityType, Channel, ChannelId, ChannelType, Guild, GuildChannel, GuildId, Member,
             Presence, UserId,
         },
+        user::User,
         voice::VoiceState,
     },
     prelude::*,
@@ -197,6 +198,58 @@ impl EventHandler for Handler {
         };
         join!(new_state_future, old_state_future);
     }
+
+    async fn guild_member_update(
+        &self,
+        _ctx: Context,
+        _old_if_available: Option<Member>,
+        new: Member,
+    ) {
+        let name_overrides = self
+            .db
+            .open_tree(name_overrides_db_tree_name(new.guild_id))
+            .unwrap();
+        if !has_overridden_name(&new, &name_overrides) {
+            let user_id_key = DbKey::from(new.user.id);
+            name_overrides.remove(user_id_key).unwrap();
+            let names = self.db.open_tree(DbKey::from(new.guild_id)).unwrap();
+            names
+                .apply_batch(make_name_batch(std::iter::once((
+                    user_id_key,
+                    new.display_name().as_str(),
+                ))))
+                .unwrap();
+        }
+    }
+    async fn guild_member_addition(&self, _ctx: Context, new_member: Member) {
+        self.db
+            .open_tree(DbKey::from(new_member.guild_id))
+            .unwrap()
+            .insert(
+                DbKey::from(new_member.user.id),
+                new_member.display_name().as_str(),
+            )
+            .unwrap();
+    }
+    async fn guild_member_removal(
+        &self,
+        _ctx: Context,
+        guild_id: GuildId,
+        user: User,
+        _member_data_if_available: Option<Member>,
+    ) {
+        let key = DbKey::from(user.id);
+        self.db
+            .open_tree(name_overrides_db_tree_name(guild_id))
+            .unwrap()
+            .remove(key)
+            .unwrap();
+        self.db
+            .open_tree(DbKey::from(guild_id))
+            .unwrap()
+            .remove(key)
+            .unwrap();
+    }
 }
 impl Handler {
     async fn process_voice_state_update(&self, ctx: &Context, voice_state: &VoiceState) {
@@ -230,7 +283,7 @@ impl Handler {
                     info!("Could not determine champion for {} ({}). Selected username for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
                     Cow::Borrowed(member.user.name.as_str())
                 };
-                (member.user.id, new_nick)
+                (member.user.id, from_user.name.as_str())
             }).collect();
             // First set to the old nicks so that if we crash, the old nick will stick.
             let old_nicks: Vec<_> = members
@@ -268,7 +321,8 @@ pub async fn run() {
         .unwrap();
     let intents = GatewayIntents::GUILD_PRESENCES
         | GatewayIntents::GUILD_VOICE_STATES
-        | GatewayIntents::GUILDS;
+        | GatewayIntents::GUILDS
+        | GatewayIntents::GUILD_MEMBERS;
 
     let db = sled::open("names.sled.db").unwrap();
     let mut client = Client::builder(token, intents)
