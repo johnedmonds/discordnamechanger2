@@ -75,7 +75,7 @@ pub fn has_overridden_name(member: &Member, name_overrides: &Tree) -> bool {
     get_name(name_overrides, DbKey::from(member.user.id)).as_ref()
         == Some(member.display_name().as_ref())
 }
-type NameOverridesDbTreeNameType = [u8; 9];
+pub type NameOverridesDbTreeNameType = [u8; 9];
 pub fn name_overrides_db_tree_name(guild_id: GuildId) -> NameOverridesDbTreeNameType {
     let mut name = [b'o'; 9];
     name[1..].copy_from_slice(&DbKey::from(guild_id).0);
