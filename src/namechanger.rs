@@ -70,6 +70,7 @@ async fn set_nicks<'a, S: Into<String> + Display, I: IntoIterator<Item = (UserId
             {
                 warn!("Failed to set nickname for {user_id}: {e:?}");
             }
+            info!("Successfully set nickname for {user_id}");
         })
         .await;
 }
@@ -271,7 +272,7 @@ impl Handler {
                 let source_champion_named = guild.presences.get(&from_user.id).and_then(|presence|current_champion_from_activities(&presence.activities));
                 let new_nick = if let Some(champion) = source_champion_named {
                     info!(
-                        "Selected champion {champion} (from {} ({}) as nick for {} ({})",
+                        "Selected champion {champion} (from {} ({})) as nick for {} ({})",
                         from_user.name, from_user.id, member.user.name, member.user.id
                     );
                     // Allows us to drop guild which can't be held across await boundaries.
