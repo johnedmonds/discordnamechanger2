@@ -54,9 +54,9 @@ async fn main() {
                 user_id,
                 name,
             } => {
-                db.open_tree(DbKey::from(GuildId(guild_id)))
+                db.open_tree(DbKey::from(GuildId::new(guild_id)))
                     .unwrap()
-                    .insert(DbKey::from(UserId(user_id)), name.as_str())
+                    .insert(DbKey::from(UserId::new(user_id)), name.as_str())
                     .unwrap();
             }
         },

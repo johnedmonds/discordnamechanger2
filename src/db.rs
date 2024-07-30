@@ -22,7 +22,7 @@ impl<S: AsRef<str>> BatchAddable for (DbKey, S) {
 impl<'a> BatchAddable for &'a Member {
     fn add_to_batch(&self, batch: &mut Batch) {
         info!("Adding member {}", self.display_name());
-        (&(self.user.id, self.display_name().as_str())).add_to_batch(batch);
+        (&(self.user.id, self.display_name())).add_to_batch(batch);
     }
 }
 
@@ -30,22 +30,22 @@ impl<'a> BatchAddable for &'a Member {
 pub struct DbKey(pub [u8; 8]);
 impl From<DbKey> for UserId {
     fn from(value: DbKey) -> Self {
-        Self(u64::from_be_bytes(value.0))
+        Self::new(u64::from_be_bytes(value.0))
     }
 }
 impl From<DbKey> for GuildId {
     fn from(value: DbKey) -> Self {
-        Self(u64::from_be_bytes(value.0))
+        Self::new(u64::from_be_bytes(value.0))
     }
 }
 impl From<UserId> for DbKey {
     fn from(value: UserId) -> Self {
-        Self(value.0.to_be_bytes())
+        Self(value.get().to_be_bytes())
     }
 }
 impl From<GuildId> for DbKey {
     fn from(value: GuildId) -> Self {
-        Self(value.0.to_be_bytes())
+        Self(value.get().to_be_bytes())
     }
 }
 impl AsRef<[u8]> for DbKey {
@@ -72,8 +72,7 @@ pub fn has_overridden_name(member: &Member, name_overrides: &Tree) -> bool {
         get_name(name_overrides, DbKey::from(member.user.id)).unwrap_or("".to_string()),
         member.display_name()
     );
-    get_name(name_overrides, DbKey::from(member.user.id)).as_ref()
-        == Some(member.display_name().as_ref())
+    get_name(name_overrides, DbKey::from(member.user.id)).as_deref() == Some(member.display_name())
 }
 pub type NameOverridesDbTreeNameType = [u8; 9];
 pub fn name_overrides_db_tree_name(guild_id: GuildId) -> NameOverridesDbTreeNameType {

@@ -2,6 +2,7 @@ use futures::{stream::iter, StreamExt};
 use itertools::{Either, Itertools};
 use log::{debug, info, warn};
 use serenity::{
+    all::EditMember,
     http::Http,
     model::prelude::{GuildId, UserId},
 };
@@ -49,14 +50,14 @@ pub async fn restore_overridden(token: String, db: Db) {
                 let http = &http;
                 async move {
                     if http
-                        .get_member(guild_id.0, user_id.0)
+                        .get_member(guild_id, user_id)
                         .await
-                        .map(|member| member.display_name().as_str() == overridden_name.as_str())
+                        .map(|member| member.display_name() == overridden_name.as_str())
                         .unwrap_or(false)
                     {
                         info!("Attempting to replace {overridden_name} with {original_name} to {user_id}");
                         match guild_id
-                            .edit_member(http, user_id, |e| e.nickname(original_name))
+                            .edit_member(http, user_id, EditMember::new().nickname(original_name))
                             .await
                         {
                             Err(e) => {
@@ -121,7 +122,7 @@ pub async fn run(token: String, db: Db) {
         async move {
             debug!("Setting user with id {user_id} to name {name} in guild {guild_id}.");
             if let Err(e) = guild_id
-                .edit_member(http, user_id, |e| e.nickname(&name))
+                .edit_member(http, user_id, EditMember::new().nickname(&name))
                 .await {
                     warn!("Failed to restore user with id {user_id} to name {name} in guild {guild_id}. {e}");
                 }
