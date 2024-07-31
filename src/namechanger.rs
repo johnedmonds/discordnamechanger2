@@ -69,8 +69,9 @@ async fn set_nicks<'a, S: Into<String> + Display, I: IntoIterator<Item = (UserId
                 .await
             {
                 warn!("Failed to set nickname for {user_id}: {e:?}");
+            } else {
+                info!("Successfully set nickname for {user_id}");
             }
-            info!("Successfully set nickname for {user_id}");
         })
         .await;
 }
@@ -278,7 +279,7 @@ impl Handler {
                     // Allows us to drop guild which can't be held across await boundaries.
                     Cow::Owned(champion.to_string())
                 } else if let Some(nick) = get_name(&names, DbKey::from(member.user.id) ){
-                    info!("Could not determine champion for {} ({}). Selected hardcoded nick {nick} for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
+                    info!("Could not determine champion for {} ({}). Selected historical nick {nick} for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
                     Cow::Owned(nick)
                 } else {
                     info!("Could not determine champion for {} ({}). Selected username for {} ({})", from_user.name, from_user.id, member.user.name, member.user.id);
@@ -301,6 +302,7 @@ impl Handler {
                 ))
             })
             .collect();
+        info!("Setting old nicknames so they're saved if we encounter an error.");
         set_nicks(ctx, guild_id, old_nicks).await;
         let name_overrides = self
             .db
@@ -311,6 +313,7 @@ impl Handler {
         name_overrides
             .apply_batch(make_name_batch(new_nicks.iter()))
             .unwrap();
+        info!("Setting new nicknames");
         set_nicks(ctx, guild_id, new_nicks).await;
     }
 }
