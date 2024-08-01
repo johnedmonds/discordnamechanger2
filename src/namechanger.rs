@@ -316,13 +316,20 @@ impl Handler {
                     if renamable_members.is_empty() {
                         None
                     } else {
-                        let n = r.gen_range(0..renamable_members.len());
-                        let n = if renamable_members[n].user.id == member.user.id {
-                            (n + 1) % renamable_members.len()
-                        } else {
-                            n
-                        };
-                        let selected_member_to_rename = renamable_members.swap_remove(n);
+                        let renamable_member_index_candidate =
+                            r.gen_range(0..renamable_members.len());
+                        let renamable_member_index =
+                            if renamable_members[renamable_member_index_candidate].user.id
+                                == member.user.id
+                            {
+                                // We want to avoid giving the user their own champion if we can.
+                                // However, this should still work if there's only 1 renamable member.
+                                (renamable_member_index_candidate + 1) % renamable_members.len()
+                            } else {
+                                renamable_member_index_candidate
+                            };
+                        let selected_member_to_rename =
+                            renamable_members.swap_remove(renamable_member_index);
                         info!("Selected {champion_name} for {selected_member_to_rename:?}");
                         Some((
                             selected_member_to_rename.user.id,
